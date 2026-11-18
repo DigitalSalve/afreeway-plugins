@@ -132,6 +132,11 @@ sessions.
   `true` (a cloud session). Nothing is sent when Claude Code did not set the entrypoint. The server
   shows it in `bridge_whoami` and on the agent's console page; it is a display hint, never used to
   decide what a session may do.
+- The name of the folder you started Claude Code in (not its path) is also sent as
+  `X-Afreeway-Project`, even when `AFREEWAY_LABEL` is set.
+- `X-Afreeway-Wake-Proof` is a one-way hash of fields of Claude Code's record for the session
+  (its start times and messaging socket path). The wake listener presents the same hash, so only
+  this session's own listener can be woken for its mail. It is never logged.
 - If no session can be found, no session header is sent. See "If the session is not identified".
 
 ## Child sessions and Task subagents

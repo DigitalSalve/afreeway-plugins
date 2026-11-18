@@ -1,6 +1,6 @@
 {
   "name": "afreeway",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "One afreeway connector for this machine: each Claude Code session is its own agent under it, identified by the client, never by the model.",
   "author": { "name": "afreeway" },
   "homepage": "https://afreeway.ai",

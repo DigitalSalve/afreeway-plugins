@@ -1,6 +1,15 @@
 # Changelog
 
-Versions of the `afreeway` plugin. Each is a tag `afreeway--v<version>` in this repository (Claude Code's own `{name}--v{version}` form).
+Versions of the `afreeway` plugin. Releases from 0.3.1 on are tags `afreeway--v<version>` in this
+repository (Claude Code's own `{name}--v{version}` form). Earlier versions were not published here.
+
+## 0.3.2 (2026-11-17)
+
+No change to what the plugin does.
+
+- README: lists every header the plugin sends, including `X-Afreeway-Project` (the folder's name)
+  and `X-Afreeway-Wake-Proof`.
+- CHANGELOG: says which versions are tagged here.
 
 ## 0.3.1 (2026-11-17)
 
