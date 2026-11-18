@@ -1,0 +1,108 @@
+#!/bin/sh
+# afreeway headersHelper, named with no extension so that Windows finds headers.cmd,
+# which runs this with Git for Windows' bash. Prints the JSON headers that tell the server which
+# session this request is from:
+#   X-Afreeway-Session         this Claude Code session's id, from Claude Code's own record
+#   X-Afreeway-Parent-Session  the session that started this one: AFREEWAY_PARENT_SESSION
+#   X-Afreeway-Label           display label (AFREEWAY_LABEL or the folder name)
+#   X-Afreeway-Surface         where it runs: CLAUDE_CODE_ENTRYPOINT or the record's
+#                              entrypoint, "+remote" in a cloud session
+#   X-Afreeway-Project         the project folder's name, not its path
+#   X-Afreeway-Wake-Proof      a hash of fields of that record, which the wake hook also
+#                              presents (lib.sh af_wake_proof). Never logged
+# Prints {} when no session can be found, and says why in plugin.log. Always exits 0
+# with valid JSON: a failing helper would hurt the sign-in.
+umask 077
+here=$(dirname -- "$0")
+if ! . "$here/lib.sh" 2>/dev/null; then printf '{}'; exit 0; fi
+
+fail() {
+  af_log "headers: no session header: $1"
+  printf '{}'
+  exit 0
+}
+
+command -v awk >/dev/null 2>&1 || fail "awk is not on PATH: it is needed to read Claude Code's session record"
+
+socket=${CLAUDE_CODE_MESSAGING_SOCKET:-}
+[ -n "$socket" ] || fail "CLAUDE_CODE_MESSAGING_SOCKET is not set: Claude Code may have changed; update the plugin"
+
+# Whose record it is: the record's pid must be the process that ran this script, so a
+# record can't be another session's, even one whose socket value this process kept.
+# On Windows the pids can't be compared: a record naming the inherited parent is refused.
+windows=''
+af_is_windows && windows=1
+above=$(af_shell_parent)
+
+# Sets got, rec_id, rec_entry from $lines, counting only records of this process.
+af_pick() {
+  got=0
+  while IFS='|' read -r r_id r_pid r_entry r_started r_folder r_proc; do
+    af_valid_id "$r_id" || continue
+    if [ -z "$windows" ]; then
+      [ -n "$r_pid" ] || continue
+      [ "$r_pid" = "$PPID" ] || [ "$r_pid" = "$above" ] || continue
+    fi
+    got=$((got + 1))
+    rec_id=$r_id
+    rec_entry=$r_entry
+    rec_started=$r_started
+    rec_proc=$r_proc
+    rec_folder=$r_folder
+  done <<EOF
+$lines
+EOF
+}
+
+# The record is there before the helper runs, so the wait is only for a read that met a
+# write in progress: about 2 seconds by the clock, in tries if date can't give the time.
+started=$(date +%s 2>/dev/null)
+case $started in
+  '' | *[!0-9]*) started='' ;;
+esac
+i=0
+got=0
+lines=''
+while :; do
+  lines=$(af_record_lines "$socket")
+  af_pick
+  [ "$got" -gt 0 ] && break
+  if [ -n "$started" ]; then
+    [ "$(($(date +%s) - started))" -lt 2 ] || break
+  else
+    [ "$i" -lt 8 ] || break
+  fi
+  i=$((i + 1))
+  sleep 0.2 2>/dev/null || { sleep 1; i=$((i + 4)); }
+done
+[ -n "$lines" ] || fail "no Claude Code session record has messagingSocketPath=$(af_clean_label "$socket"): Claude Code may have changed; update the plugin"
+[ "$got" -gt 0 ] || fail "the Claude Code session record for this socket is another process's (this helper's parent is pid $PPID): a child sharing its parent's socket, or a wrapper between Claude Code and the helper"
+[ "$got" -eq 1 ] || fail "$got Claude Code session records match this socket and can't be told apart; refused"
+
+# The session that started this one. A session resumed from its own shell inherits its
+# own id: no parent. On Windows that can't be told from a child that kept its parent's
+# socket value, which must not act as its parent.
+parent=$(af_inherited)
+if [ "$rec_id" = "$parent" ]; then
+  [ -z "$windows" ] || fail "the record for this socket is the session named by AFREEWAY_PARENT_SESSION: a child sharing its parent's socket, or a session resumed from its own shell (env -u AFREEWAY_PARENT_SESSION claude to start clean)"
+  parent=''
+fi
+
+out='{"X-Afreeway-Session":"'$rec_id'"'
+[ -n "$parent" ] && out=$out',"X-Afreeway-Parent-Session":"'$parent'"'
+label=$(af_session_label "$rec_folder")
+[ -n "$label" ] && out=$out',"X-Afreeway-Label":"'$(af_json_escape "$label")'"'
+# From the record: this script's own folder is the plugin's, not the session's.
+project=$(af_clean_label "$rec_folder")
+[ -n "$project" ] && out=$out',"X-Afreeway-Project":"'$(af_json_escape "$project")'"'
+surface=$(af_surface "$rec_entry") && out=$out',"X-Afreeway-Surface":"'$surface'"'
+# Only the hash is ever sent. Without one the session still works, and only wake is lost.
+if proof=$(af_wake_proof "$rec_proc" "$rec_started" "$socket"); then
+  out=$out',"X-Afreeway-Wake-Proof":"'$proof'"'
+elif [ -z "$rec_proc" ] || [ -z "$rec_started" ]; then
+  af_log "headers: no wake proof: the session record lacks a field it needs: Claude Code may have changed; update the plugin"
+else
+  af_log "headers: no wake proof: no working shasum, sha256sum or openssl"
+fi
+printf '%s}' "$out"
+exit 0

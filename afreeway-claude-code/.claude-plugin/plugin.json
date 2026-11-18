@@ -1,0 +1,10 @@
+{
+  "name": "afreeway",
+  "version": "0.3.1",
+  "description": "One afreeway connector for this machine: each Claude Code session is its own agent under it, identified by the client, never by the model.",
+  "author": { "name": "afreeway" },
+  "homepage": "https://afreeway.ai",
+  "repository": "https://github.com/DigitalSalve/afreeway-plugins",
+  "license": "MIT",
+  "privacyPolicyUrl": "https://afreeway.ai/privacy/"
+}

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "afreeway": {
+      "type": "http",
+      "url": "https://app.afreeway.ai/mcp",
+      "headersHelper": "\"${CLAUDE_PLUGIN_ROOT}/scripts/headers\""
+    }
+  }
+}

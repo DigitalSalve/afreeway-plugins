@@ -1,0 +1,5 @@
+# The scripts must keep their line endings on any clone: Git for Windows converts by
+# default, and a CR breaks sh, while a command file needs CRLF for its labels to work.
+scripts/headers text eol=lf
+*.sh text eol=lf
+*.cmd text eol=crlf

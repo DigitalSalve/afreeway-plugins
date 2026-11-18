@@ -1,0 +1,14 @@
+{
+  "name": "afreeway",
+  "owner": {
+    "name": "afreeway"
+  },
+  "description": "The afreeway Claude Code plugin.",
+  "plugins": [
+    {
+      "name": "afreeway",
+      "source": "./afreeway-claude-code",
+      "description": "One afreeway connector for this machine; each Claude Code session is its own agent under it."
+    }
+  ]
+}
