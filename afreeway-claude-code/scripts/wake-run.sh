@@ -57,12 +57,23 @@ if [ -z "$socket" ]; then
   af_log "wake: not listening: CLAUDE_CODE_MESSAGING_SOCKET is not set: Claude Code may have changed; update the plugin"
   exit 0
 fi
-# This session's record: the socket and the id must both match, and only one may. A read can
-# meet a write in progress, so it gets about 2 seconds, as the helper does.
+# This session's record: the socket and the id must both match, and only one may. Claude Code
+# writes the record in steps, and at startup this can run before it exists or before procStart
+# and startedAt are in it, so it polls for about 15 seconds until the one record has both.
+# AF_WAKE_RECORD_WAIT_S (whole seconds, 1..15, else 15) is for the tests; the headers helper has
+# its own, AF_RECORD_WAIT_S. More than one match ends the wait: more waiting would not change it.
+wait_n=${AF_WAKE_RECORD_WAIT_S:-15}
+case $wait_n in
+  '' | *[!0-9]* | 0) wait_n=15 ;;
+esac
+[ "$wait_n" -le 15 ] || wait_n=15
+wait_n=$((wait_n * 4))
 i=0
 got=0
 while :; do
   got=0
+  rec_started=''
+  rec_proc=''
   while IFS='|' read -r r_id _ _ r_started _ r_proc; do
     [ "$r_id" = "$sid" ] || continue
     got=$((got + 1))
@@ -71,7 +82,9 @@ while :; do
   done <<EOF
 $(af_record_lines "$socket")
 EOF
-  if [ "$got" -gt 0 ] || [ "$i" -ge 8 ]; then break; fi
+  if [ "$got" -gt 1 ]; then break; fi
+  if [ "$got" -eq 1 ] && [ -n "$rec_proc" ] && [ -n "$rec_started" ]; then break; fi
+  if [ "$i" -ge "$wait_n" ]; then break; fi
   i=$((i + 1))
   sleep 0.25 2>/dev/null || { sleep 1; i=$((i + 3)); }
 done

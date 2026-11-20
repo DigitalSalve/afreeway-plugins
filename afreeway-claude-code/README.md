@@ -71,7 +71,7 @@ under about 32 KB, with no session ids and no secrets. It is the plugin's only f
 | The log says | What it means |
 |---|---|
 | `CLAUDE_CODE_MESSAGING_SOCKET is not set` | Claude Code is older than this plugin needs, or has changed; update |
-| `no Claude Code session record has messagingSocketPath=...` | no record matched, after about 2 seconds: Claude Code has changed; update the plugin |
+| `no Claude Code session record has messagingSocketPath=...` | no record matched, after about 7 seconds: Claude Code has changed; update the plugin |
 | `the Claude Code session record for this socket is another process's` | a child that kept its parent's socket value, so it sends nothing rather than its parent's id. Also a wrapper between Claude Code and the helper (for example `/usr/bin/time`): run the helper directly |
 | `N Claude Code session records match this socket` | refused, never guessed |
 | `the record for this socket is the session named by AFREEWAY_PARENT_SESSION` | Windows only, where pids can't be compared: a child sharing its parent's socket, or a session resumed from its own shell, which looks the same there. `env -u AFREEWAY_PARENT_SESSION claude` starts clean |
@@ -83,6 +83,8 @@ under about 32 KB, with no session ids and no secrets. It is the plugin's only f
 | `wake: not listening: the pipe to Claude Code closed` | Claude Code went away, or has changed; if the session is still running, update the plugin |
 | `wake: not waking: this session's id has changed (/clear)` | that mail stays on the old id; resuming the old session reads it |
 | `wake: stream lost (curl N, http N), trying again` | the connection dropped; it reconnects by itself |
+
+The helper polls for the record, up to about 7 seconds from its start (Claude Code kills a headers helper at 10). Claude Code writes the record in steps: it can exist before `procStart` and `startedAt` are filled in, so the helper keeps polling until both are there, and only then builds the wake proof. If the budget runs out first, the session header is sent without the proof and the log says `no wake proof`. When it had to wait for those fields it also logs one line, `waited Ns for the record's fields; wake proof sent|not sent`, which confirms the race in the field; nothing is logged when the record was complete at once. The passes are capped as well as timed, so a stalled or backward clock can't run it to the kill. A record that names another process, or two matches, is final and is not retried. `AF_RECORD_WAIT_S` (1 to 7 seconds) sets the helper's budget and `AF_WAKE_RECORD_WAIT_S` (1 to 15) the wake listener's; both are for tests.
 
 ## Install
 

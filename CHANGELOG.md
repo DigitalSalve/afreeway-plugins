@@ -3,6 +3,15 @@
 Versions of the `afreeway` plugin. Releases from 0.3.1 on are tags `afreeway--v<version>` in this
 repository (Claude Code's own `{name}--v{version}` form). Earlier versions were not published here.
 
+## 0.3.3 (2026-11-20)
+
+- Fixes a new session sometimes starting without its wake proof. Claude Code writes a session's
+  record in steps, and the plugin could read it before the start time and process start were filled
+  in. The plugin now waits for the complete record, up to about 7 seconds (Claude Code stops a
+  headers helper at 10), and the wake listener waits up to 15.
+- When it had to wait, the plugin log says how long, in one line: `waited Ns for the record's
+  fields; wake proof sent` (or `not sent`). Nothing is logged when the record was complete at once.
+
 ## 0.3.2 (2026-11-17)
 
 No change to what the plugin does.

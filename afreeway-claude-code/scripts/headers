@@ -13,6 +13,11 @@
 # Prints {} when no session can be found, and says why in plugin.log. Always exits 0
 # with valid JSON: a failing helper would hurt the sign-in.
 umask 077
+# The deadline runs from here, before anything else is read or loaded.
+t0=$(date +%s 2>/dev/null)
+case $t0 in
+  '' | *[!0-9]*) t0='' ;;
+esac
 here=$(dirname -- "$0")
 if ! . "$here/lib.sh" 2>/dev/null; then printf '{}'; exit 0; fi
 
@@ -34,14 +39,19 @@ windows=''
 af_is_windows && windows=1
 above=$(af_shell_parent)
 
-# Sets got, rec_id, rec_entry from $lines, counting only records of this process.
+# Sets got, rec_id, rec_entry from $lines, counting only records of this process. Also sets
+# foreign: how many whole records name another process, which is a final answer, not a wait.
 af_pick() {
   got=0
+  foreign=0
   while IFS='|' read -r r_id r_pid r_entry r_started r_folder r_proc; do
     af_valid_id "$r_id" || continue
     if [ -z "$windows" ]; then
       [ -n "$r_pid" ] || continue
-      [ "$r_pid" = "$PPID" ] || [ "$r_pid" = "$above" ] || continue
+      if [ "$r_pid" != "$PPID" ] && [ "$r_pid" != "$above" ]; then
+        foreign=$((foreign + 1))
+        continue
+      fi
     fi
     got=$((got + 1))
     rec_id=$r_id
@@ -54,23 +64,48 @@ $lines
 EOF
 }
 
-# The record is there before the helper runs, so the wait is only for a read that met a
-# write in progress: about 2 seconds by the clock, in tries if date can't give the time.
-started=$(date +%s 2>/dev/null)
-case $started in
-  '' | *[!0-9]*) started='' ;;
+# Claude Code writes the session record in more than one step: it can exist, with the socket
+# and id, before procStart and startedAt are filled in. A helper that stops at the first match
+# then sends no wake proof ("the session record lacks a field"). At startup the record can also
+# be missing altogether. So the helper polls until the record is there AND has both fields.
+# The budget runs from script entry (t0): about 7 seconds, with a margin under the 10 seconds
+# at which Claude Code kills a headers helper (headers.cmd on Windows adds time we can't count). A pass is only started while it can still finish
+# inside the budget (the clock has whole seconds, so one is held back). With no usable clock the
+# tries are counted instead, conservatively: each is 0.2 s of sleep plus an awk run, and a
+# 1 s sleep counts as five. With a clock the passes are capped too (5 a second of budget, each
+# sleeps 0.2 s, so the cap never shortens a normal wait), and a clock that stalls or steps
+# back can't loop to the kill: now < t0 counts as expired. AF_RECORD_WAIT_S sets the budget,
+# in whole seconds held to 1..7, anything else is 7; it is for the tests. Only a missing or unfinished record is waited for: a
+# record that is another process's is final, and two matches are final too.
+wait_s=${AF_RECORD_WAIT_S:-7}
+case $wait_s in
+  [1-7]) ;;
+  *) wait_s=7 ;;
 esac
+max_tries=$((wait_s * 2))
+max_passes=$((wait_s * 5))
+saw_partial=''
 i=0
 got=0
+foreign=0
 lines=''
 while :; do
   lines=$(af_record_lines "$socket")
   af_pick
-  [ "$got" -gt 0 ] && break
-  if [ -n "$started" ]; then
-    [ "$(($(date +%s) - started))" -lt 2 ] || break
+  [ "$got" -gt 1 ] && break
+  [ "$got" -eq 1 ] && [ -n "$rec_proc" ] && [ -n "$rec_started" ] && break
+  [ "$got" -eq 1 ] && saw_partial=1
+  [ "$got" -eq 0 ] && [ "$foreign" -gt 0 ] && break
+  if [ -n "$t0" ]; then
+    now=$(date +%s 2>/dev/null)
+    case $now in
+      '' | *[!0-9]*) now=$((t0 + wait_s)) ;;
+    esac
+    [ "$now" -ge "$t0" ] || break
+    [ "$((now - t0 + 1))" -lt "$wait_s" ] || break
+    [ "$i" -lt "$max_passes" ] || break
   else
-    [ "$i" -lt 8 ] || break
+    [ "$i" -lt "$max_tries" ] || break
   fi
   i=$((i + 1))
   sleep 0.2 2>/dev/null || { sleep 1; i=$((i + 4)); }
@@ -103,6 +138,23 @@ elif [ -z "$rec_proc" ] || [ -z "$rec_started" ]; then
   af_log "headers: no wake proof: the session record lacks a field it needs: Claude Code may have changed; update the plugin"
 else
   af_log "headers: no wake proof: no working shasum, sha256sum or openssl"
+fi
+# One line when the helper had to wait for the record's fields, to confirm the half-written
+# record race in the field. Nothing is logged for a record complete on the first pass.
+if [ -n "$saw_partial" ]; then
+  waited='?'
+  if [ -n "$t0" ]; then
+    now=$(date +%s 2>/dev/null)
+    case $now in
+      '' | *[!0-9]*) ;;
+      *) [ "$now" -ge "$t0" ] && waited=$((now - t0)) ;;
+    esac
+  fi
+  case $out in
+    *Wake-Proof*) sent=sent ;;
+    *) sent='not sent' ;;
+  esac
+  af_log "headers: waited ${waited}s for the record's fields; wake proof $sent"
 fi
 printf '%s}' "$out"
 exit 0
